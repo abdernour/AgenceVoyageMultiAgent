@@ -8,7 +8,10 @@ public class Proposition implements Concept {
     private Vol volPropose;
     private Hotel hotelPropose;
     private float coutTotal;
-    private AID agentProposeur;
+
+    // IMPORTANT: AID is NOT in the ontology schema
+    // It's for internal use only and won't be serialized
+    private transient AID agentProposeur;
 
     // Constructeur par défaut
     public Proposition() {}
@@ -49,6 +52,7 @@ public class Proposition implements Concept {
     public float getCoutTotal() { return coutTotal; }
     public void setCoutTotal(float coutTotal) { this.coutTotal = coutTotal; }
 
+    // AgentProposeur - not serialized via ontology
     public AID getAgentProposeur() { return agentProposeur; }
     public void setAgentProposeur(AID agentProposeur) {
         this.agentProposeur = agentProposeur;

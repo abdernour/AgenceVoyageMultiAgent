@@ -8,7 +8,9 @@ public class Voyage implements Concept {
     private String destination;
     private Date dateDepart;
     private Date dateRetour;
-    private int nombrePersonnes;
+    private int nombreAdultes;
+    private int nombreEnfants;
+    private int nombreChambres;      // NEW: Explicit room count
     private float budgetMax;
     private Vol volReserve;
     private Hotel hotelReserve;
@@ -16,17 +18,33 @@ public class Voyage implements Concept {
     // Constructeur par défaut (OBLIGATOIRE pour JADE)
     public Voyage() {}
 
-    // Constructeur avec paramètres
+    // Constructeur avec paramètres (UPDATED)
     public Voyage(String destination, Date dateDepart, Date dateRetour,
-                  int nombrePersonnes, float budgetMax) {
+                  int nombreAdultes, int nombreEnfants, int nombreChambres, float budgetMax) {
         this.destination = destination;
         this.dateDepart = dateDepart;
         this.dateRetour = dateRetour;
-        this.nombrePersonnes = nombrePersonnes;
+        this.nombreAdultes = nombreAdultes;
+        this.nombreEnfants = nombreEnfants;
+        this.nombreChambres = nombreChambres;
         this.budgetMax = budgetMax;
     }
 
-    // Getters et Setters (TOUS OBLIGATOIRES pour JADE)
+    // Calculate number of nights
+    public int getNombreNuits() {
+        if (dateDepart != null && dateRetour != null) {
+            long diff = dateRetour.getTime() - dateDepart.getTime();
+            return (int) (diff / (1000 * 60 * 60 * 24));
+        }
+        return 0;
+    }
+
+    // Calculate total number of people
+    public int getNombrePersonnes() {
+        return nombreAdultes + nombreEnfants;
+    }
+
+    // Getters et Setters
     public String getIdVoyage() { return idVoyage; }
     public void setIdVoyage(String idVoyage) { this.idVoyage = idVoyage; }
 
@@ -39,9 +57,20 @@ public class Voyage implements Concept {
     public Date getDateRetour() { return dateRetour; }
     public void setDateRetour(Date dateRetour) { this.dateRetour = dateRetour; }
 
-    public int getNombrePersonnes() { return nombrePersonnes; }
-    public void setNombrePersonnes(int nombrePersonnes) {
-        this.nombrePersonnes = nombrePersonnes;
+    public int getNombreAdultes() { return nombreAdultes; }
+    public void setNombreAdultes(int nombreAdultes) {
+        this.nombreAdultes = nombreAdultes;
+    }
+
+    public int getNombreEnfants() { return nombreEnfants; }
+    public void setNombreEnfants(int nombreEnfants) {
+        this.nombreEnfants = nombreEnfants;
+    }
+
+    // NEW: Room count getter/setter
+    public int getNombreChambres() { return nombreChambres; }
+    public void setNombreChambres(int nombreChambres) {
+        this.nombreChambres = nombreChambres;
     }
 
     public float getBudgetMax() { return budgetMax; }
@@ -52,15 +81,4 @@ public class Voyage implements Concept {
 
     public Hotel getHotelReserve() { return hotelReserve; }
     public void setHotelReserve(Hotel hotelReserve) { this.hotelReserve = hotelReserve; }
-
-    @Override
-    public String toString() {
-        return "Voyage{" +
-                "destination='" + destination + '\'' +
-                ", dateDepart=" + dateDepart +
-                ", dateRetour=" + dateRetour +
-                ", nombrePersonnes=" + nombrePersonnes +
-                ", budgetMax=" + budgetMax +
-                '}';
-    }
 }

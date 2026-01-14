@@ -12,7 +12,10 @@ public class Hotel implements Concept {
     private int categorie; // 1 à 5 étoiles
     private float prixParNuit;
     private int chambresDisponibles;
-    private List<String> services; // wifi, piscine, parking, etc.
+
+    // IMPORTANT: This field is NOT in the ontology schema
+    // It's for internal use only and won't be serialized
+    private transient List<String> services;
 
     // Constructeur par défaut
     public Hotel() {
@@ -56,8 +59,14 @@ public class Hotel implements Concept {
         this.chambresDisponibles = chambresDisponibles;
     }
 
-    public List<String> getServices() { return services; }
-    public void setServices(List<String> services) { this.services = services; }
+    // Services field - not serialized via ontology
+    public List<String> getServices() {
+        if (services == null) services = new ArrayList<>();
+        return services;
+    }
+    public void setServices(List<String> services) {
+        this.services = services;
+    }
 
     @Override
     public String toString() {
