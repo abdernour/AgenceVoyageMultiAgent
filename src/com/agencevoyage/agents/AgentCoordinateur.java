@@ -10,37 +10,43 @@ import jade.domain.FIPAException;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.proto.ContractNetInitiator;
+import jade.content.ContentManager;
+import jade.content.lang.Codec;
+import jade.content.lang.sl.SLCodec;
+import jade.content.onto.Ontology;
+import jade.content.onto.OntologyException;
+import jade.content.onto.basic.Action;
+import jade.content.ContentElement;
 
-import com.agencevoyage.ontology.concepts.Proposition;
+import com.agencevoyage.ontology.VoyageOntology;
+import com.agencevoyage.ontology.concepts.*;
+import com.agencevoyage.ontology.actions.RechercherVoyage;
+import com.agencevoyage.ontology.predicates.*;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
-import java.util.Enumeration;
-import java.util.UUID;
 
 public class AgentCoordinateur extends Agent {
-
-    private List<Proposition> propositionsRecues;
+    private Codec codec = new SLCodec();
+    private Ontology ontology = VoyageOntology.getInstance();
+    private ContentManager contentManager;
 
     protected void setup() {
-        System.out.println("🎯 Agent Coordinateur " + getLocalName() + " is starting...");
+        System.out.println("Coordinateur " + getLocalName() + " starting...");
 
-        propositionsRecues = new ArrayList<>();
+        contentManager = getContentManager();
+        contentManager.registerLanguage(codec);
+        contentManager.registerOntology(ontology);
 
-        // Register in Yellow Pages
         enregistrerDansDF();
-
-        // Add behaviour to receive travel requests
         addBehaviour(new RecevoirDemandeVoyage());
-
-        System.out.println("🎯 Agent Coordinateur is ready!");
+        System.out.println("Coordinateur ready!");
     }
 
     protected void takeDown() {
         try {
             DFService.deregister(this);
-            System.out.println("🎯 Agent Coordinateur is shutting down.");
         } catch (FIPAException e) {
             e.printStackTrace();
         }
@@ -49,33 +55,26 @@ public class AgentCoordinateur extends Agent {
     private void enregistrerDansDF() {
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
-
         ServiceDescription sd = new ServiceDescription();
         sd.setType("coordinateur-voyage");
         sd.setName("service-coordination");
         dfd.addServices(sd);
-
         try {
             DFService.register(this, dfd);
-            System.out.println("    ✅ Registered as Coordinateur");
         } catch (FIPAException e) {
             e.printStackTrace();
         }
     }
 
-    // Search for agents in DF by service type
     private AID[] rechercherAgents(String serviceType) {
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription sd = new ServiceDescription();
         sd.setType(serviceType);
         template.addServices(sd);
-
         try {
             DFAgentDescription[] result = DFService.search(this, template);
             AID[] agents = new AID[result.length];
-            for (int i = 0; i < result.length; i++) {
-                agents[i] = result[i].getName();
-            }
+            for (int i = 0; i < result.length; i++) agents[i] = result[i].getName();
             return agents;
         } catch (FIPAException e) {
             e.printStackTrace();
@@ -83,364 +82,266 @@ public class AgentCoordinateur extends Agent {
         }
     }
 
-    // Behaviour: Receive travel requests from Interface
     private class RecevoirDemandeVoyage extends CyclicBehaviour {
-
         public void action() {
-            MessageTemplate template = MessageTemplate.MatchPerformative(ACLMessage.REQUEST);
+            MessageTemplate template = MessageTemplate.and(
+                    MessageTemplate.MatchPerformative(ACLMessage.REQUEST),
+                    MessageTemplate.MatchLanguage(codec.getName())
+            );
             ACLMessage request = myAgent.receive(template);
 
             if (request != null) {
-                System.out.println("\n📨 Coordinateur received travel request from " +
-                        request.getSender().getLocalName());
+                System.out.println("\nCoordinateur received request from " + request.getSender().getLocalName());
 
-                // Send AGREE acknowledgment
-                ACLMessage agree = request.createReply();
-                agree.setPerformative(ACLMessage.AGREE);
-                agree.setContent("Request received, searching for best offers...");
-                send(agree);
+                try {
+                    ContentElement ce = contentManager.extractContent(request);
+                    if (ce instanceof Action) {
+                        Action action = (Action) ce;
+                        if (action.getAction() instanceof RechercherVoyage) {
+                            RechercherVoyage recherche = (RechercherVoyage) action.getAction();
+                            Voyage voyage = recherche.getVoyage();
 
-                // Extract travel info
-                String content = request.getContent();
-                String destination = extraireDestination(content);
-                int nights = extraireNuits(content);
-                float budget = extraireBudget(content);
+                            System.out.println("   Searching for: " + voyage.getDestination());
+                            System.out.println("   " + voyage.getDateDepart() + " to " + voyage.getDateRetour());
+                            System.out.println("   " + voyage.getNombreAdultes() + " adults, " +
+                                    voyage.getNombreEnfants() + " children");
+                            System.out.println("   " + voyage.getNombreChambres() + " rooms"); // NEW
+                            System.out.println("   Budget: " + voyage.getBudgetMax() + " DA");
 
-                System.out.println("    📍 Destination: " + destination);
-                System.out.println("    🌙 Nights: " + nights);
-                System.out.println("    💰 Budget: " + budget + " DA");
+                            ACLMessage agree = request.createReply();
+                            agree.setPerformative(ACLMessage.AGREE);
+                            agree.setContent("Searching for best offers...");
+                            send(agree);
 
-                // Launch Contract-Net negotiation
-                lancerNegociation(request.getSender(), destination, nights, budget);
+                            lancerNegociation(request.getSender(), voyage, request.getConversationId());
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("❌ Error extracting request content");
+                    e.printStackTrace();
 
+                    ACLMessage failure = request.createReply();
+                    failure.setPerformative(ACLMessage.FAILURE);
+                    failure.setContent("Invalid request format");
+                    send(failure);
+                }
             } else {
                 block();
             }
         }
-
-        private String extraireDestination(String content) {
-            if (content.contains("destination:")) {
-                return content.split("destination:")[1].split(",")[0].trim();
-            }
-            return "Rome";
-        }
-
-        private int extraireNuits(String content) {
-            if (content.contains("nights:")) {
-                String val = content.split("nights:")[1].split(",")[0].trim();
-                return Integer.parseInt(val);
-            }
-            return 5;
-        }
-
-        private float extraireBudget(String content) {
-            if (content.contains("budget:")) {
-                String val = content.split("budget:")[1].split(",")[0].trim();
-                return Float.parseFloat(val);
-            }
-            return 100000.0f;
-        }
     }
 
-    // Launch Contract-Net Protocol
-    private void lancerNegociation(AID clientAgent, String destination, int nights, float budget) {
-        System.out.println("\n🔄 Launching Contract-Net Protocol...");
-        System.out.println("╔════════════════════════════════════════════════════════════╗");
-        System.out.println("║          NEGOTIATION IN PROGRESS - PLEASE WAIT            ║");
-        System.out.println("╚════════════════════════════════════════════════════════════╝");
-
-        // Find Vol and Hotel agents
+    private void lancerNegociation(AID clientAgent, Voyage voyage, String convId) {
         AID[] agentsVol = rechercherAgents("vente-vol");
         AID[] agentsHotel = rechercherAgents("vente-hotel");
-
-        System.out.println("\n📡 Found " + agentsVol.length + " Vol agents");
-        System.out.println("📡 Found " + agentsHotel.length + " Hotel agents");
-        System.out.println("\n⏳ Sending CFP to all providers...\n");
-
-        // Combine all agents
         AID[] allAgents = new AID[agentsVol.length + agentsHotel.length];
         System.arraycopy(agentsVol, 0, allAgents, 0, agentsVol.length);
         System.arraycopy(agentsHotel, 0, allAgents, agentsVol.length, agentsHotel.length);
 
-        // Create CFP message
         ACLMessage cfp = new ACLMessage(ACLMessage.CFP);
-        for (AID agent : allAgents) {
-            cfp.addReceiver(agent);
+        for (AID agent : allAgents) cfp.addReceiver(agent);
+        cfp.setLanguage(codec.getName());
+        cfp.setOntology(ontology.getName());
+        cfp.setConversationId(convId);
+
+        try {
+            VoyageInfo voyageInfo = new VoyageInfo(voyage);
+            contentManager.fillContent(cfp, voyageInfo);
+            addBehaviour(new NegociationContractNet(this, cfp, clientAgent, voyage));
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-
-        String cfpContent = "destination:" + destination + ",nights:" + nights + ",budget:" + budget;
-        cfp.setContent(cfpContent);
-        cfp.setConversationId("travel-booking-" + System.currentTimeMillis());
-        cfp.setReplyWith("cfp" + System.currentTimeMillis());
-
-        // Launch Contract-Net behaviour
-        addBehaviour(new NegociationContractNet(this, cfp, clientAgent, destination, nights, budget));
     }
 
-    // Contract-Net Initiator Behaviour
     private class NegociationContractNet extends ContractNetInitiator {
-
         private AID clientAgent;
-        private String destination;
-        private int nights;
-        private float budget;
+        private Voyage voyage;
+        private String conversationId;
+        private List<ACLMessage> propositionsVol = new ArrayList<>();
+        private List<ACLMessage> propositionsHotel = new ArrayList<>();
 
-        private List<ACLMessage> propositionsVol;
-        private List<ACLMessage> propositionsHotel;
-
-        public NegociationContractNet(Agent a, ACLMessage cfp, AID client,
-                                      String dest, int nts, float bdg) {
+        public NegociationContractNet(Agent a, ACLMessage cfp, AID client, Voyage v) {
             super(a, cfp);
             this.clientAgent = client;
-            this.destination = dest;
-            this.nights = nts;
-            this.budget = bdg;
-            this.propositionsVol = new ArrayList<>();
-            this.propositionsHotel = new ArrayList<>();
+            this.voyage = v;
+            this.conversationId = cfp.getConversationId();
         }
 
+        @SuppressWarnings("unchecked")
         protected void handlePropose(ACLMessage propose, Vector acceptances) {
-            String agentName = propose.getSender().getLocalName();
-
-            // Real-time progress display
-            if (agentName.toLowerCase().contains("vol")) {
-                System.out.println("✈️  [FLIGHT PROPOSAL] " + agentName);
+            String name = propose.getSender().getLocalName();
+            if (name.toLowerCase().contains("vol")) {
                 propositionsVol.add(propose);
-                float prix = extrairePrix(propose.getContent());
-                System.out.println("    💵 Price: " + prix + " DA");
-            } else if (agentName.toLowerCase().contains("hotel")) {
-                System.out.println("🏨 [HOTEL PROPOSAL] " + agentName);
+            } else if (name.toLowerCase().contains("hotel")) {
                 propositionsHotel.add(propose);
-                float prixTotal = extrairePrixTotal(propose.getContent());
-                System.out.println("    💵 Total Price: " + prixTotal + " DA");
             }
-
-            System.out.println("    ⏰ Received at: " + new java.util.Date());
-            System.out.println();
         }
 
-        protected void handleRefuse(ACLMessage refuse) {
-            System.out.println("❌ [REFUSED] " + refuse.getSender().getLocalName());
-            System.out.println("    📝 Reason: " + refuse.getContent());
-            System.out.println();
-        }
-
+        @SuppressWarnings("unchecked")
         protected void handleAllResponses(Vector responses, Vector acceptances) {
-            System.out.println("\n╔════════════════════════════════════════════════════════════╗");
-            System.out.println("║              ALL PROPOSALS RECEIVED                        ║");
-            System.out.println("╚════════════════════════════════════════════════════════════╝\n");
-
-            System.out.println("📊 Flight proposals: " + propositionsVol.size());
-            System.out.println("📊 Hotel proposals: " + propositionsHotel.size());
+            System.out.println("Total responses: " + responses.size());
+            System.out.println("Flight proposals: " + propositionsVol.size());
+            System.out.println("Hotel proposals: " + propositionsHotel.size());
 
             if (propositionsVol.isEmpty() || propositionsHotel.isEmpty()) {
-                System.out.println("\n❌ Not enough proposals to create package");
-                envoyerEchecAuClient("No complete package available");
+                envoyerEchec("No complete package available");
                 return;
             }
 
-            // Display comparison table
-            afficherTableauComparatif();
+            List<Proposition> validPropositions = new ArrayList<>();
 
-            // Find best combination
-            ACLMessage meilleurVol = null;
-            ACLMessage meilleurHotel = null;
-            float meilleurPrix = Float.MAX_VALUE;
+            for (ACLMessage volMsg : propositionsVol) {
+                try {
+                    VolInfo volInfo = (VolInfo) contentManager.extractContent(volMsg);
+                    Vol vol = volInfo.getVol();
 
-            System.out.println("\n🔍 Analyzing combinations...\n");
+                    for (ACLMessage hotelMsg : propositionsHotel) {
+                        HotelInfo hotelInfo = (HotelInfo) contentManager.extractContent(hotelMsg);
+                        Hotel hotel = hotelInfo.getHotel();
 
-            for (ACLMessage vol : propositionsVol) {
-                float prixVol = extrairePrix(vol.getContent());
+                        // UPDATED: Use explicit room count
+                        float prixTotal = vol.getPrix() +
+                                (hotel.getPrixParNuit() * voyage.getNombreNuits() * voyage.getNombreChambres());
 
-                for (ACLMessage hotel : propositionsHotel) {
-                    float prixHotel = extrairePrixTotal(hotel.getContent());
-                    float prixTotal = prixVol + prixHotel;
+                        if (prixTotal <= voyage.getBudgetMax()) {
+                            Proposition prop = new Proposition();
+                            prop.setVolPropose(vol);
+                            prop.setHotelPropose(hotel);
+                            prop.setCoutTotal(prixTotal);
+                            validPropositions.add(prop);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
 
-                    if (prixTotal <= budget && prixTotal < meilleurPrix) {
-                        meilleurPrix = prixTotal;
-                        meilleurVol = vol;
-                        meilleurHotel = hotel;
+            if (validPropositions.isEmpty()) {
+                envoyerEchec("No offers within budget");
+                return;
+            }
+
+            validPropositions.sort((p1, p2) -> Float.compare(p1.getCoutTotal(), p2.getCoutTotal()));
+
+            // Deduplicate
+            List<Proposition> uniquePropositions = new ArrayList<>();
+            for (Proposition prop : validPropositions) {
+                boolean isDuplicate = false;
+                for (Proposition existing : uniquePropositions) {
+                    if (isSameProposition(prop, existing)) {
+                        isDuplicate = true;
+                        System.out.println("   Duplicate found: " +
+                                prop.getVolPropose().getCompagnie() + " + " +
+                                prop.getHotelPropose().getNom());
+                        break;
                     }
                 }
+                if (!isDuplicate) {
+                    uniquePropositions.add(prop);
+                    System.out.println("   Unique option: " +
+                            prop.getVolPropose().getCompagnie() + " (" +
+                            prop.getVolPropose().getIdVol() + ") + " +
+                            prop.getHotelPropose().getNom() + " (" +
+                            prop.getHotelPropose().getIdHotel() + ") - " +
+                            voyage.getNombreChambres() + " rooms = " +
+                            prop.getCoutTotal() + " DA");
+                }
             }
 
-            if (meilleurVol == null || meilleurHotel == null) {
-                System.out.println("❌ No combination within budget");
-                envoyerEchecAuClient("No offers within budget of " + budget + " DA");
+            System.out.println("\nTotal combinations found: " + validPropositions.size());
+            System.out.println("Unique options after deduplication: " + uniquePropositions.size());
+
+            if (uniquePropositions.isEmpty()) {
+                envoyerEchec("No offers within budget");
                 return;
             }
 
-            System.out.println("╔════════════════════════════════════════════════════════════╗");
-            System.out.println("║                 BEST COMBINATION FOUND!                    ║");
-            System.out.println("╚════════════════════════════════════════════════════════════╝\n");
+            System.out.println("Cheapest: " + uniquePropositions.get(0).getCoutTotal() + " DA");
+            if (uniquePropositions.size() > 1) {
+                System.out.println("Most expensive: " + uniquePropositions.get(uniquePropositions.size()-1).getCoutTotal() + " DA");
+            }
 
-            System.out.println("✈️  Flight: " + meilleurVol.getSender().getLocalName() +
-                    " - " + extrairePrix(meilleurVol.getContent()) + " DA");
-            System.out.println("🏨 Hotel: " + meilleurHotel.getSender().getLocalName() +
-                    " - " + extrairePrixTotal(meilleurHotel.getContent()) + " DA");
-            System.out.println("\n💰 TOTAL: " + meilleurPrix + " DA (Budget: " + budget + " DA)");
-            System.out.println("💾 Savings: " + (budget - meilleurPrix) + " DA\n");
+            validPropositions = uniquePropositions;
 
-            // Send ACCEPT-PROPOSAL to selected agents
-            for (Enumeration e = responses.elements(); e.hasMoreElements();) {
-                ACLMessage response = (ACLMessage) e.nextElement();
+            // Accept/Reject proposals
+            for (int i = 0; i < responses.size(); i++) {
+                ACLMessage response = (ACLMessage) responses.get(i);
                 ACLMessage reply = response.createReply();
 
-                if (response == meilleurVol || response == meilleurHotel) {
-                    reply.setPerformative(ACLMessage.ACCEPT_PROPOSAL);
-                    System.out.println("✅ Accepting: " + response.getSender().getLocalName());
-                } else {
-                    reply.setPerformative(ACLMessage.REJECT_PROPOSAL);
+                boolean isPartOfValidCombo = false;
+                for (Proposition prop : validPropositions) {
+                    if (isProposalInCombo(response, prop)) {
+                        isPartOfValidCombo = true;
+                        break;
+                    }
                 }
 
+                reply.setPerformative(isPartOfValidCombo
+                        ? ACLMessage.ACCEPT_PROPOSAL
+                        : ACLMessage.REJECT_PROPOSAL);
                 acceptances.add(reply);
             }
 
-            // Generate booking ID and store final offer
-            String bookingID = genererBookingID();
-            storeOfferForClient(meilleurVol, meilleurHotel, meilleurPrix, bookingID);
+            envoyerOffresMultiples(validPropositions);
         }
 
-        private void afficherTableauComparatif() {
-            System.out.println("\n╔════════════════════════════════════════════════════════════╗");
-            System.out.println("║             COMPARISON TABLE - ALL PROPOSALS               ║");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-
-            // Flight proposals
-            System.out.println("║  ✈️  FLIGHT PROPOSALS:                                      ║");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-            System.out.printf("║  %-25s %-20s %-10s ║%n", "Provider", "Company", "Price (DA)");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-
-            for (ACLMessage vol : propositionsVol) {
-                String provider = vol.getSender().getLocalName();
-                String company = extraireCompagnie(vol.getContent());
-                float prix = extrairePrix(vol.getContent());
-                System.out.printf("║  %-25s %-20s %10.2f ║%n",
-                        truncate(provider, 25), truncate(company, 20), prix);
-            }
-
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-
-            // Hotel proposals
-            System.out.println("║  🏨 HOTEL PROPOSALS:                                        ║");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-            System.out.printf("║  %-25s %-15s %-7s %-10s ║%n", "Provider", "Hotel", "Stars", "Total (DA)");
-            System.out.println("╠════════════════════════════════════════════════════════════╣");
-
-            for (ACLMessage hotel : propositionsHotel) {
-                String provider = hotel.getSender().getLocalName();
-                String hotelName = extraireNomHotel(hotel.getContent());
-                String stars = extraireCategorie(hotel.getContent());
-                float total = extrairePrixTotal(hotel.getContent());
-                System.out.printf("║  %-25s %-15s %-7s %10.2f ║%n",
-                        truncate(provider, 25), truncate(hotelName, 15), stars, total);
-            }
-
-            System.out.println("╚════════════════════════════════════════════════════════════╝");
-        }
-
-        private String truncate(String str, int maxLen) {
-            if (str.length() <= maxLen) return str;
-            return str.substring(0, maxLen - 3) + "...";
-        }
-
-        private String extraireCompagnie(String content) {
-            if (content.contains("Compagnie:")) {
-                return content.split("Compagnie:")[1].split(",")[0].trim();
-            }
-            return "N/A";
-        }
-
-        private String extraireNomHotel(String content) {
-            if (content.contains("Nom:")) {
-                return content.split("Nom:")[1].split(",")[0].trim();
-            }
-            return "N/A";
-        }
-
-        private String extraireCategorie(String content) {
-            if (content.contains("Categorie:")) {
-                return content.split("Categorie:")[1].split(",")[0].trim();
-            }
-            return "N/A";
-        }
-
-        protected void handleInform(ACLMessage inform) {
-            System.out.println("✅ Received confirmation from " +
-                    inform.getSender().getLocalName());
-        }
-
-        protected void handleAllResultNotifications(Vector resultNotifications) {
-            System.out.println("\n✅ All confirmations received!");
-            System.out.println("📦 Package confirmed and ready for client!\n");
-        }
-
-        private float extrairePrix(String content) {
+        private boolean isProposalInCombo(ACLMessage proposal, Proposition combo) {
             try {
-                if (content.contains("Prix:")) {
-                    String prix = content.split("Prix:")[1].split(",")[0].trim();
-                    return Float.parseFloat(prix);
+                if (proposal.getSender().getLocalName().toLowerCase().contains("vol")) {
+                    VolInfo volInfo = (VolInfo) contentManager.extractContent(proposal);
+                    Vol vol = volInfo.getVol();
+                    return vol.getIdVol().equals(combo.getVolPropose().getIdVol());
+                } else if (proposal.getSender().getLocalName().toLowerCase().contains("hotel")) {
+                    HotelInfo hotelInfo = (HotelInfo) contentManager.extractContent(proposal);
+                    Hotel hotel = hotelInfo.getHotel();
+                    return hotel.getIdHotel().equals(combo.getHotelPropose().getIdHotel());
                 }
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return 0.0f;
+            return false;
         }
 
-        private float extrairePrixTotal(String content) {
+        private boolean isSameProposition(Proposition p1, Proposition p2) {
+            if (p1.getVolPropose() == null || p2.getVolPropose() == null) return false;
+            if (p1.getHotelPropose() == null || p2.getHotelPropose() == null) return false;
+
+            boolean sameVol = p1.getVolPropose().getIdVol().equals(p2.getVolPropose().getIdVol());
+            boolean sameHotel = p1.getHotelPropose().getIdHotel().equals(p2.getHotelPropose().getIdHotel());
+
+            return sameVol && sameHotel;
+        }
+
+        private void envoyerOffresMultiples(List<Proposition> propositions) {
             try {
-                if (content.contains("Total:")) {
-                    String total = content.split("Total:")[1].split(",")[0].replace("DA", "").replace("€", "").trim();
-                    return Float.parseFloat(total);
+                for (Proposition prop : propositions) {
+                    ACLMessage inform = new ACLMessage(ACLMessage.INFORM);
+                    inform.addReceiver(clientAgent);
+                    inform.setLanguage(codec.getName());
+                    inform.setOntology(ontology.getName());
+                    inform.setConversationId(conversationId);
+
+                    PropositionInfo propInfo = new PropositionInfo(prop);
+                    contentManager.fillContent(inform, propInfo);
+                    myAgent.send(inform);
+
+                    System.out.println("   Sent offer: " + prop.getCoutTotal() + " DA");
+                    Thread.sleep(50);
                 }
+
+                System.out.println("All " + propositions.size() + " offers sent to client");
+
             } catch (Exception e) {
                 e.printStackTrace();
+                envoyerEchec("Error creating response");
             }
-            return 0.0f;
         }
 
-        private String genererBookingID() {
-            return "BK-" + System.currentTimeMillis() + "-" +
-                    UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        }
-
-        private void storeOfferForClient(ACLMessage vol, ACLMessage hotel, float total, String bookingID) {
-            String offer = "BEST_OFFER|" + vol.getContent() + "|" + hotel.getContent() +
-                    "|Total:" + total + "|BookingID:" + bookingID;
-            myAgent.addBehaviour(new SendOfferToClient(clientAgent, offer));
-        }
-
-        private void envoyerEchecAuClient(String raison) {
+        private void envoyerEchec(String raison) {
             ACLMessage failure = new ACLMessage(ACLMessage.FAILURE);
             failure.addReceiver(clientAgent);
             failure.setContent(raison);
             myAgent.send(failure);
-            System.out.println("❌ Sent failure to client: " + raison);
-        }
-    }
-
-    // Simple behaviour to send offer to client
-    private class SendOfferToClient extends CyclicBehaviour {
-        private AID client;
-        private String offer;
-        private boolean sent = false;
-
-        public SendOfferToClient(AID client, String offer) {
-            this.client = client;
-            this.offer = offer;
-        }
-
-        public void action() {
-            if (!sent) {
-                ACLMessage inform = new ACLMessage(ACLMessage.INFORM);
-                inform.addReceiver(client);
-                inform.setContent(offer);
-                myAgent.send(inform);
-                sent = true;
-                System.out.println("📤 Sent final offer to Interface");
-            }
-            myAgent.removeBehaviour(this);
         }
     }
 }

@@ -8,184 +8,201 @@ import jade.domain.DFService;
 import jade.domain.FIPAException;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
-
-import com.agencevoyage.ontology.concepts.Vol;
-
+import jade.content.ContentManager;
+import jade.content.lang.Codec;
+import jade.content.lang.sl.SLCodec;
+import jade.content.onto.Ontology;
+import com.agencevoyage.utils.DatabaseManager;
+import com.agencevoyage.ontology.VoyageOntology;
+import com.agencevoyage.ontology.concepts.*;
+import com.agencevoyage.ontology.predicates.*;
+import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Date;
-import java.util.Calendar;
+import java.util.List;
 
 public class AgentVol extends Agent {
+    private Connection dbConnection;
+    private SimpleDateFormat dateFormat;
+    private Codec codec = new SLCodec();
+    private Ontology ontology = VoyageOntology.getInstance();
+    private ContentManager contentManager;
+    private String airlineName; // NEW: Each agent represents ONE airline
 
-    // Database of available flights
-    private List<Vol> vols;
-
-    // Agent setup - called when agent starts
     protected void setup() {
-        System.out.println("✈️ Agent Vol " + getLocalName() + " is starting...");
+        System.out.println("Agent Vol " + getLocalName() + " is starting...");
+        contentManager = getContentManager();
+        contentManager.registerLanguage(codec);
+        contentManager.registerOntology(ontology);
 
-        // Initialize flight database
-        initialiserVols();
+        dbConnection = DatabaseManager.getConnection();
+        dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
-        // Register in the Yellow Pages (DF)
+        if (dbConnection == null) {
+            System.err.println("❌ Failed to connect to database!");
+            doDelete();
+            return;
+        }
+
+        // ========== NEW: Determine airline from agent name ==========
+        String agentName = getLocalName().toLowerCase();
+        if (agentName.contains("airfrance")) {
+            airlineName = "Air France";
+        } else if (agentName.contains("ryanair")) {
+            airlineName = "Ryanair";
+        } else if (agentName.contains("easyjet")) {
+            airlineName = "EasyJet";
+        } else if (agentName.contains("emirates")) {
+            airlineName = "Emirates";
+        } else if (agentName.contains("british")) {
+            airlineName = "British Airways";
+        } else {
+            // Default: agent can search all airlines
+            airlineName = null;
+        }
+
+        System.out.println("   🏢 Representing airline: " + (airlineName != null ? airlineName : "ALL"));
+
         enregistrerDansDF();
-
-        // Add behaviour to handle CFP messages
         addBehaviour(new RepondreAuxCFP());
-
-        System.out.println("✈️ Agent Vol " + getLocalName() + " is ready");
-        System.out.println("   Available flights: " + vols.size());
+        System.out.println("Agent Vol " + getLocalName() + " is ready!");
     }
 
-    // Agent cleanup - called when agent stops
     protected void takeDown() {
         try {
             DFService.deregister(this);
-            System.out.println("✈️ Agent Vol " + getLocalName() + " is shutting down.");
+            System.out.println("Agent Vol shutting down.");
         } catch (FIPAException e) {
             e.printStackTrace();
         }
     }
 
-    // Initialize fake flight data (prices in DA: 1 EUR ≈ 140 DA)
-    private void initialiserVols() {
-        vols = new ArrayList<>();
-
-        // Get agent name to differentiate data
-        String agentName = getLocalName();
-
-        if (agentName.contains("AirFrance") || agentName.contains("1")) {
-            // Agent Vol 1 - Premium flights
-            vols.add(creerVol("V001", "Air France", "Algiers", "Rome",
-                    49000.0f, 50, "economique", 2));
-            vols.add(creerVol("V002", "Air France", "Algiers", "Barcelona",
-                    39200.0f, 30, "economique", 2));
-            vols.add(creerVol("V003", "Air France", "Algiers", "London",
-                    58800.0f, 40, "business", 3));
-        } else {
-            // Agent Vol 2 - Budget flights
-            vols.add(creerVol("V101", "Ryanair", "Algiers", "Rome",
-                    25200.0f, 80, "economique", 3));
-            vols.add(creerVol("V102", "EasyJet", "Algiers", "Barcelona",
-                    21000.0f, 60, "economique", 2));
-            vols.add(creerVol("V103", "Vueling", "Algiers", "London",
-                    28000.0f, 70, "economique", 2));
-        }
-    }
-
-    // Helper method to create a flight
-    private Vol creerVol(String id, String compagnie, String depart,
-                         String arrivee, float prix, int sieges,
-                         String classe, int joursApres) {
-        Vol vol = new Vol();
-        vol.setIdVol(id);
-        vol.setCompagnie(compagnie);
-        vol.setVilleDepart(depart);
-        vol.setVilleArrivee(arrivee);
-        vol.setPrix(prix);
-        vol.setSiegesDisponibles(sieges);
-        vol.setClasse(classe);
-
-        // Set departure date (today + joursApres)
-        Calendar cal = Calendar.getInstance();
-        cal.add(Calendar.DAY_OF_MONTH, joursApres);
-        vol.setDateHeureDepart(cal.getTime());
-
-        // Set arrival date (2 hours later)
-        cal.add(Calendar.HOUR, 2);
-        vol.setDateHeureArrivee(cal.getTime());
-
-        return vol;
-    }
-
-    // Register agent in the Directory Facilitator (Yellow Pages)
     private void enregistrerDansDF() {
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
-
         ServiceDescription sd = new ServiceDescription();
         sd.setType("vente-vol");
         sd.setName("service-vol-" + getLocalName());
         dfd.addServices(sd);
-
         try {
             DFService.register(this, dfd);
-            System.out.println("   ✅ Registered in Yellow Pages");
+            System.out.println("   Registered in Yellow Pages");
         } catch (FIPAException e) {
-            System.err.println("   ❌ Failed to register in DF");
+            System.err.println("   Failed to register in DF");
             e.printStackTrace();
         }
     }
 
-    // Search for a flight matching the request
-    private Vol rechercherVol(String destination) {
-        for (Vol vol : vols) {
-            if (vol.getVilleArrivee().equalsIgnoreCase(destination) &&
-                    vol.getSiegesDisponibles() > 0) {
-                return vol;
-            }
+    // ========== UPDATED: Filter by airline ==========
+    private List<Vol> rechercherVolsMultiples(String destination, Date departureDate, int passengers) {
+        List<Vol> vols = new ArrayList<>();
+
+        // Build SQL with optional airline filter
+        String sql = "SELECT flight_id, flight_code, airline, origin, destination, " +
+                "departure_date, departure_time, arrival_time, class, base_price, available_seats " +
+                "FROM flights WHERE destination = ? AND departure_date >= ? " +
+                "AND departure_date <= DATE_ADD(?, INTERVAL 3 DAY) " +
+                "AND available_seats >= ? AND active = TRUE ";
+
+        // Add airline filter if this agent represents a specific airline
+        if (airlineName != null) {
+            sql += "AND airline = ? ";
         }
-        return null; // No flight found
+
+        sql += "ORDER BY departure_date ASC, base_price ASC LIMIT 2";
+
+        try (PreparedStatement stmt = dbConnection.prepareStatement(sql)) {
+            stmt.setString(1, destination);
+            stmt.setDate(2, new java.sql.Date(departureDate.getTime()));
+            stmt.setDate(3, new java.sql.Date(departureDate.getTime()));
+            stmt.setInt(4, passengers);
+
+            // Set airline parameter if needed
+            if (airlineName != null) {
+                stmt.setString(5, airlineName);
+            }
+
+            ResultSet rs = stmt.executeQuery();
+
+            while (rs.next()) {
+                Vol vol = new Vol();
+                vol.setIdVol(String.valueOf(rs.getInt("flight_id")));
+                vol.setCompagnie(rs.getString("airline"));
+                vol.setVilleDepart(rs.getString("origin"));
+                vol.setVilleArrivee(rs.getString("destination"));
+
+                Date depDate = rs.getDate("departure_date");
+                Time depTime = rs.getTime("departure_time");
+                vol.setDateHeureDepart(new Date(depDate.getTime() + depTime.getTime()));
+
+                Time arrTime = rs.getTime("arrival_time");
+                vol.setDateHeureArrivee(new Date(depDate.getTime() + arrTime.getTime()));
+
+                vol.setClasse(rs.getString("class"));
+                vol.setPrix(rs.getFloat("base_price") * passengers);
+                vol.setSiegesDisponibles(rs.getInt("available_seats"));
+                vols.add(vol);
+            }
+            rs.close();
+        } catch (SQLException e) {
+            System.err.println("   Database error");
+            e.printStackTrace();
+        }
+        return vols;
     }
 
-    // Behaviour: Respond to CFP messages
     private class RepondreAuxCFP extends CyclicBehaviour {
-
         public void action() {
-            // Template to receive only CFP messages
-            MessageTemplate template = MessageTemplate.MatchPerformative(ACLMessage.CFP);
+            MessageTemplate template = MessageTemplate.and(
+                    MessageTemplate.MatchPerformative(ACLMessage.CFP),
+                    MessageTemplate.MatchLanguage(codec.getName())
+            );
             ACLMessage message = myAgent.receive(template);
 
             if (message != null) {
-                // CFP received!
-                System.out.println("✈️ " + getLocalName() + " received CFP from " +
-                        message.getSender().getLocalName());
+                System.out.println(getLocalName() + " (" +
+                        (airlineName != null ? airlineName : "ALL") + ") received CFP");
+                try {
+                    VoyageInfo voyageInfo = (VoyageInfo) contentManager.extractContent(message);
+                    Voyage voyage = voyageInfo.getVoyage();
 
-                // Extract destination from message content
-                String destination = extraireDestination(message.getContent());
+                    List<Vol> vols = rechercherVolsMultiples(
+                            voyage.getDestination(),
+                            voyage.getDateDepart(),
+                            voyage.getNombrePersonnes()
+                    );
 
-                // Search for available flight
-                Vol volDisponible = rechercherVol(destination);
+                    if (vols.isEmpty()) {
+                        ACLMessage reply = message.createReply();
+                        reply.setPerformative(ACLMessage.REFUSE);
+                        reply.setContent("No flights available from " + airlineName);
+                        send(reply);
+                        System.out.println("   No flights available");
+                    } else {
+                        for (Vol vol : vols) {
+                            ACLMessage reply = message.createReply();
+                            reply.setLanguage(codec.getName());
+                            reply.setOntology(ontology.getName());
+                            reply.setPerformative(ACLMessage.PROPOSE);
 
-                // Prepare reply
-                ACLMessage reply = message.createReply();
-
-                if (volDisponible != null) {
-                    // Flight found - send PROPOSE
-                    reply.setPerformative(ACLMessage.PROPOSE);
-                    reply.setContent(creerProposition(volDisponible));
-                    System.out.println("   ✅ Proposing: " + volDisponible.getCompagnie() +
-                            " to " + destination + " - " + volDisponible.getPrix() + " DA");
-                } else {
-                    // No flight - send REFUSE
+                            VolInfo volInfo = new VolInfo(vol);
+                            contentManager.fillContent(reply, volInfo);
+                            send(reply);
+                            System.out.println("   Proposed: " + vol.getCompagnie() +
+                                    " (ID:" + vol.getIdVol() + ") - " + vol.getPrix() + " DA");
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("   Error processing CFP");
+                    e.printStackTrace();
+                    ACLMessage reply = message.createReply();
                     reply.setPerformative(ACLMessage.REFUSE);
-                    reply.setContent("Aucun vol disponible pour " + destination);
-                    System.out.println("   ❌ No flights to " + destination);
+                    send(reply);
                 }
-
-                send(reply);
-
             } else {
-                // No message - block until next message arrives
                 block();
             }
-        }
-
-        // Extract destination from message (simple parsing)
-        private String extraireDestination(String content) {
-            if (content != null && content.contains("destination:")) {
-                return content.split("destination:")[1].split(",")[0].trim();
-            }
-            return content;
-        }
-
-        // Create proposal string (simple format for now)
-        private String creerProposition(Vol vol) {
-            return "Vol:" + vol.getIdVol() +
-                    ",Compagnie:" + vol.getCompagnie() +
-                    ",Prix:" + vol.getPrix() +
-                    ",Classe:" + vol.getClasse();
         }
     }
 }
