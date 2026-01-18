@@ -17,7 +17,7 @@ public class MainLauncher {
 
             AgentContainer mainContainer = rt.createMainContainer(profile);
 
-            System.out.println("🚀 Starting Intelligent Travel Agency System...\n");
+            System.out.println("Starting Intelligent Travel Agency System...\n");
 
             // Create Coordinateur
             System.out.println("Creating Coordinateur...");
@@ -63,18 +63,18 @@ public class MainLauncher {
             hotelBud.start();
             Thread.sleep(1000);
 
-            // Create Interface (User Interface)
+            // Create User Interface
             System.out.println("\nCreating User Interface...");
             AgentController interfaceAgent = mainContainer.createNewAgent(
                     "AgentInterface",
-                    "com.agencevoyage.agents.AgentInterface",
+                    "com.agencevoyage.agents.AgentUI",
                     new Object[0]
             );
             interfaceAgent.start();
 
-            System.out.println("\n✅ All agents started successfully!");
-            System.out.println("📊 Check JADE GUI to see all agents");
-            System.out.println("💬 Follow console for user interaction\n");
+            System.out.println("\nAll agents started successfully!");
+            System.out.println("Check JADE GUI to see all agents");
+            System.out.println("Follow console for user interaction\n");
 
         } catch (Exception e) {
             e.printStackTrace();
