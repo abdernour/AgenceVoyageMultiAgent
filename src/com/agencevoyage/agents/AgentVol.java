@@ -28,7 +28,7 @@ public class AgentVol extends Agent {
     private Codec codec = new SLCodec();
     private Ontology ontology = VoyageOntology.getInstance();
     private ContentManager contentManager;
-    private String airlineName; // NEW: Each agent represents ONE airline
+    private String airlineName; //  Each agent represents ONE airline
 
     protected void setup() {
         System.out.println("Agent Vol " + getLocalName() + " is starting...");
@@ -45,7 +45,7 @@ public class AgentVol extends Agent {
             return;
         }
 
-        // ========== NEW: Determine airline from agent name ==========
+        // ========== Determine airline from agent name ==========
         String agentName = getLocalName().toLowerCase();
         if (agentName.contains("airfrance")) {
             airlineName = "Air France";
@@ -94,7 +94,7 @@ public class AgentVol extends Agent {
         }
     }
 
-    // ========== UPDATED: Filter by airline ==========
+    // ========== Filter by airline ==========
     private List<Vol> rechercherVolsMultiples(String destination, Date departureDate, int passengers) {
         List<Vol> vols = new ArrayList<>();
 

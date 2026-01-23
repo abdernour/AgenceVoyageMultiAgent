@@ -50,7 +50,7 @@ public class AgentHotel extends Agent {
             hotelCategory = null;
         }
 
-        System.out.println("   🏢 Specializing in: " +
+        System.out.println("    Specializing in: " +
                 (hotelCategory != null ? hotelCategory.toUpperCase() : "ALL") + " hotels");
 
         enregistrerDansDF();
@@ -83,7 +83,7 @@ public class AgentHotel extends Agent {
         }
     }
 
-    // UPDATED: Use explicit roomsNeeded parameter
+    // Use explicit roomsNeeded parameter
     private List<Hotel> rechercherHotelsMultiples(String city, int roomsNeeded) {
         List<Hotel> hotels = new ArrayList<>();
 

@@ -11,7 +11,7 @@ public class TestDatabase {
         boolean connected = DatabaseManager.testConnection();
 
         if (connected) {
-            System.out.println("\n📊 Fetching sample data...\n");
+            System.out.println("\nFetching sample data...\n");
 
             // Test flights
             testFlights();

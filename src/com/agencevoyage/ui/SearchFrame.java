@@ -261,7 +261,7 @@ public class SearchFrame extends JFrame {
         budgetField = new UIComponents.RoundedTextField("100000", "$");
         form.add(createLabel("$ Maximum Budget (DA)", budgetField), gbc);
 
-        // Row 3: Travelers + Rooms (UPDATED)
+        // Row 3: Travelers + Rooms 
         gbc.gridx = 0; gbc.gridy = 2;
         gbc.insets = new Insets(0, 0, 0, 30);
         adultsSpinner = new UIComponents.RoundedSpinner(new SpinnerNumberModel(2, 1, 10, 1), "");
@@ -350,7 +350,7 @@ public class SearchFrame extends JFrame {
             voyage.setDateRetour(ret);
             voyage.setNombreAdultes(ad);
             voyage.setNombreEnfants(ch);
-            voyage.setNombreChambres(rooms); // NEW: Set room count
+            voyage.setNombreChambres(rooms); 
             voyage.setBudgetMax(budget);
 
             String convId = "travel-" + System.currentTimeMillis();
